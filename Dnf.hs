@@ -3,6 +3,8 @@
 {-# LANGUAGE UnicodeSyntax, TypeSynonymInstances, FlexibleInstances #-}
 
 import Data.List
+import qualified Data.Set as Set
+import qualified Data.Map as Map
 import Control.Monad
 import Test.QuickCheck
 import System.IO.Unsafe
@@ -391,4 +393,147 @@ prop_ecnf :: Formula -> Bool
 prop_ecnf phi = equi_satisfiable phi (cnf2formula $ ecnf phi)
 
 -- quickCheckWith (stdArgs {maxSize = 10}) prop_ecnf
+
+remove_tautologies :: CNF -> CNF
+remove_tautologies c = filter (isNotTautology Set.empty) c
+
+isNotTautology :: Set.Set Literal -> [Literal] -> Bool
+isNotTautology set [] = True
+isNotTautology set (x:xs) = (Set.notMember (opposite x) set) && (isNotTautology (Set.insert x set) xs)
+
+one_literal :: CNF -> CNF
+one_literal cnf = do
+    let withoutTautologies = remove_tautologies cnf
+    let set = getOneLiterals withoutTautologies Set.empty 
+    if Set.null set 
+        then withoutTautologies
+        else one_literal $ removeLiterals withoutTautologies set
+
+getOneLiterals :: CNF -> Set.Set Literal -> Set.Set Literal
+-- If we already have Pos q, do not fetch Neg q, because we should change [Neg q] to [] later.
+getOneLiterals (([l]):xs) s = if (Set.notMember (opposite l) s) 
+  then getOneLiterals xs (Set.insert l s)
+  else getOneLiterals xs s
+getOneLiterals ((_):xs) s = getOneLiterals xs s
+getOneLiterals _ s = s 
+
+removeLiterals :: CNF -> Set.Set Literal -> CNF
+removeLiterals (c:cs) s = if (doesNotContainSomeLiteral c s)
+    then (cleared:t)
+    else t
+  where
+    cleared = filter (\x -> Set.notMember (opposite x) s) c
+    t = removeLiterals cs s
+removeLiterals [] _ = []
+
+doesNotContainSomeLiteral :: [Literal] -> Set.Set Literal -> Bool
+doesNotContainSomeLiteral [] _ = True
+doesNotContainSomeLiteral (x:xs) s = (Set.notMember x s) && (doesNotContainSomeLiteral xs s)
+
+
+-- one_literal [[Pos "p"], [Pos "p", Pos "q", Pos "p", Pos "r"], [Neg "q", Pos "r", Neg "p", Neg "r", Neg "p"], [Neg "q", Neg "p"], [Pos "q", Pos "r", Pos "s"], [Neg "p", Pos "p"]]
+
+prop_one_literal =
+  one_literal [[Pos "p"], [Pos "p", Pos "q", Pos "p", Pos "r"], [Neg "q", Pos "r", Neg "p", Neg "r", Neg "p"], [Neg "q", Neg "p"], [Pos "q", Pos "r", Pos "s"], [Neg "p", Pos "p"]] == [[Pos "r",Pos "s"]] &&
+  one_literal [[Pos "p"],[Pos "p1"],[Neg "p",Pos "q"],[Pos "p1",Pos "p0"],[Pos "q",Neg "p0",Pos "p1"],[Neg "p0",Pos "s"],[Neg "q0",Neg "p"],[Neg "s",Neg "p",Pos "p0"]] ==
+    [[Neg "p0",Pos "s"],[Neg "s",Pos "p0"]] &&
+  one_literal
+    [[Pos "q"],[Pos "p0"],[Neg "p0",Pos "s"],[Neg "p0"]] ==
+    [[]]
+
+-- quickCheck prop_one_literal
+
+affirmative_negative :: CNF -> CNF
+affirmative_negative cnf = removeOnlyPosOrNeg newCnf sets
+  where
+    newCnf = one_literal cnf
+    sets = getLiterals newCnf Set.empty
+
+getLiterals :: CNF -> Set.Set Literal -> Set.Set Literal
+getLiterals [] s = s
+getLiterals (c:cs) s = getLiterals cs (insertLiterals c s)
+
+insertLiterals :: CNFClause -> Set.Set Literal -> Set.Set Literal
+insertLiterals [] s = s 
+insertLiterals (l:ls) s = insertLiterals ls (Set.insert l s)
+
+removeOnlyPosOrNeg :: CNF -> Set.Set Literal -> CNF
+removeOnlyPosOrNeg [] _ = []
+removeOnlyPosOrNeg (c:cs) s = if newClause /= []
+  then (newClause:newTail)
+  else newTail
+  where
+    newClause = removeClauseIfOnlyPositiveOrNegative c s
+    newTail = removeOnlyPosOrNeg cs s
+
+removeClauseIfOnlyPositiveOrNegative :: CNFClause -> Set.Set Literal -> CNFClause
+removeClauseIfOnlyPositiveOrNegative [] _ = [Pos "a"]
+removeClauseIfOnlyPositiveOrNegative (l:ls) s = if (isOnlyPosOrNeg l s)
+  then []
+  else
+    if newTail == []
+      then []
+      else (l:ls)
+  where
+    newTail = removeClauseIfOnlyPositiveOrNegative ls s
+
+isOnlyPosOrNeg :: Literal -> Set.Set Literal -> Bool
+isOnlyPosOrNeg l s = (posOk && (not negOk)) || ((not posOk) && negOk)
+  where
+    posOk = Set.member l s 
+    negOk = Set.member (opposite l) s
+
+prop_affirmative_negative :: Bool
+prop_affirmative_negative =
+  affirmative_negative
+    [[Neg "p2",Pos "p"],[Neg "p2",Pos "p1"],[Neg "p",Neg "p1",Neg "p2"],[Neg "p1",Pos "q"],[Neg "p1",Pos "p0"],[Neg "q",Neg "p0",Pos "p1"],[Neg "p0",Pos "s"],[Neg "p0",Neg "p"],[Neg "s",Pos "p",Pos "p0"]] ==
+    [[Neg "p1",Pos "q"],[Neg "p1",Pos "p0"],[Neg "q",Neg "p0",Pos "p1"],[Neg "p0",Pos "s"],[Neg "p0",Neg "p"],[Neg "s",Pos "p",Pos "p0"]] &&
+  affirmative_negative
+    [[Pos "p", Pos "q"], [Pos "p", Neg "q"]] ==
+    []
+    
+-- quickCheck prop_affirmative_negative
+
+resolution :: CNF -> CNF
+resolution cnf = doResolution cnf minVar
+  where
+    occurenceMap = getLeastCommonVar cnf Map.empty
+    min = minimum $ Map.elems occurenceMap
+    minVar = head $ Map.keys $ Map.filter (== min) occurenceMap
+
+doResolution :: CNF -> String -> CNF
+doResolution [] _ = [[]]
+doResolution (c:cs) var = if (clauseContainsVar c var) 
+  then (((removeVarFromClause c var) ++ newHead):newTail)
+  else (newHead:c:newTail)
+  where
+    res = doResolution cs var
+    newHead = head res
+    newTail = tail res
+
+clauseContainsVar :: CNFClause -> String -> Bool
+clauseContainsVar cs var = foldr (\x a -> a || (getVarFromLiteral x == var)) True cs
+
+removeVarFromClause :: CNFClause -> String -> CNFClause
+removeVarFromClause [] _ = []
+removeVarFromClause (l:ls) var = if (getVarFromLiteral l == var)
+  then ls
+  else (l:(removeVarFromClause ls var))
+
+getLeastCommonVar :: CNF -> Map.Map String Int -> Map.Map String Int
+getLeastCommonVar [] m = m 
+getLeastCommonVar (c:cs) m = getLeastCommonVar cs (getLeastCommonVarInClause c m)
+
+getLeastCommonVarInClause :: CNFClause -> Map.Map String Int -> Map.Map String Int
+getLeastCommonVarInClause [] m = m 
+getLeastCommonVarInClause (l:ls) m = getLeastCommonVarInClause ls (Map.insertWith (+) s 1 m)
+  where
+    s = getVarFromLiteral l
+
+getVarFromLiteral :: Literal -> String
+getVarFromLiteral (Pos x) = x
+getVarFromLiteral (Neg x) = x
+
+prop_resolution :: Bool
+prop_resolution = resolution [[Pos "p", Pos "q"],[Neg "p", Neg "q"]] == [[Pos "q", Neg "q"]]
 
