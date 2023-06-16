@@ -1,4 +1,5 @@
--- Basically just lab01
+-- Basically just labs
+-- Starting with LAB 1
 {-# LANGUAGE UnicodeSyntax, TypeSynonymInstances, FlexibleInstances #-}
 
 import Data.List
@@ -272,4 +273,122 @@ test_solver :: SATSolver -> Bool
 test_solver solver = and $ map solver satisfiable_formulas ++ map (not . solver) unsatisfiable_formulas
 
 -- quickCheck (test_solver sat_dnf)
+
+
+-- LAB 2 starts here
+
+-- generation of fresh variable names
+fresh :: [PropName] -> PropName
+fresh vars = head $ filter (not . (`elem` vars)) $ map (("p"++) . show) [0..]
+
+opposite :: Literal -> Literal
+opposite (Pos p) = Neg p
+opposite (Neg p) = Pos p
+
+type CNFClause = [Literal]
+type CNF = [CNFClause]
+
+cnf2formula :: CNF -> Formula
+cnf2formula [] = T
+cnf2formula lss = foldr1 And (map go lss) where
+  go [] = F
+  go ls = foldr1 Or (map go2 ls)
+  go2 (Pos p) = Prop p
+  go2 (Neg p) = Not (Prop p)
+  
+positive_literals :: CNFClause -> [PropName]
+positive_literals ls = nub [p | Pos p <- ls]
+
+negative_literals :: CNFClause -> [PropName]
+negative_literals ls = nub [p | Neg p <- ls]
+
+literals :: [Literal] -> [PropName]
+literals ls = nub $ positive_literals ls ++ negative_literals ls
+
+cnf :: Formula -> CNF
+cnf = go . nnf where
+  go T = []
+  go F = [[]]
+  go (Prop p) = [[Pos p]]
+  go (Not (Prop p)) = [[Neg p]]
+  go (φ `And` ψ) = go φ ++ go ψ
+  go (φ `Or` ψ) = [as ++ bs | as <- go φ, bs <- go ψ]
+
+test_cnf :: Formula -> Bool
+test_cnf φ = tautology $ φ ⇔ (cnf2formula (cnf φ))
+
+-- quickCheckWith (stdArgs {maxSize = 18}) test_cnf
+
+equi_satisfiable :: Formula -> Formula -> Bool
+equi_satisfiable φ ψ = satisfiable φ == satisfiable ψ
+
+ecnf :: Formula -> CNF
+ecnf f = cnf conjunction
+  where
+    vars = variables f
+    res = ecnfMiddleStep f vars
+    conjunction = makeConjunction ((getFirst res):(getThird res))
+
+getFirst (x, _, _) = x
+getSecond (_, x, _) = x
+getThird (_, _, x) = x
+
+makeConjunction :: [Formula] -> Formula
+makeConjunction [] = T 
+makeConjunction (x:[]) = x
+makeConjunction (x:xs) = And x (makeConjunction xs)
+
+ecnfMiddleStep :: Formula -> [PropName] -> (Formula, [PropName], [Formula])
+ecnfMiddleStep (Not f) vars = ((Prop newVar), (newVar:updatedVars), ((Iff (Prop newVar) (Not newFormula)):formulas))
+  where 
+    x = ecnfMiddleStep f vars
+    newFormula = getFirst x
+    updatedVars = getSecond x
+    formulas = getThird x
+    newVar = fresh updatedVars
+ecnfMiddleStep (And f1 f2) vars = ((Prop newVar), (newVar:updatedVars), ((Iff (Prop newVar) (And newF1 newF2)):(formulas)))
+  where 
+    x = ecnfMiddleStep f1 vars
+    y = ecnfMiddleStep f2 (getSecond x)
+    newF1 = getFirst x
+    newF2 = getFirst y
+    updatedVars = getSecond y
+    formulas = (getThird x) ++ (getThird y)
+    newVar = fresh updatedVars
+ecnfMiddleStep (Or f1 f2) vars = ((Prop newVar), (newVar:updatedVars), ((Iff (Prop newVar) (Or newF1 newF2)):(formulas)))
+  where 
+    x = ecnfMiddleStep f1 vars
+    y = ecnfMiddleStep f2 (getSecond x)
+    newF1 = getFirst x
+    newF2 = getFirst y
+    updatedVars = getSecond y
+    formulas = (getThird x) ++ (getThird y)
+    newVar = fresh updatedVars
+ecnfMiddleStep (Implies f1 f2) vars = ((Prop newVar), (newVar:updatedVars), ((Iff (Prop newVar) (Implies newF1 newF2)):(formulas)))
+  where 
+    x = ecnfMiddleStep f1 vars
+    y = ecnfMiddleStep f2 (getSecond x)
+    newF1 = getFirst x
+    newF2 = getFirst y
+    updatedVars = getSecond y
+    formulas = (getThird x) ++ (getThird y)
+    newVar = fresh updatedVars
+ecnfMiddleStep (Iff f1 f2) vars = ((Prop newVar), (newVar:updatedVars), ((Iff (Prop newVar) (Iff newF1 newF2)):(formulas)))
+  where 
+    x = ecnfMiddleStep f1 vars
+    y = ecnfMiddleStep f2 (getSecond x)
+    newF1 = getFirst x
+    newF2 = getFirst y
+    updatedVars = getSecond y
+    formulas = (getThird x) ++ (getThird y)
+    newVar = fresh updatedVars
+ecnfMiddleStep f vars = (f, vars, [])
+
+
+-- ecnf (T ∧ F ∨ T)
+
+prop_ecnf :: Formula -> Bool
+prop_ecnf phi = equi_satisfiable phi (cnf2formula $ ecnf phi)
+
+-- quickCheckWith (stdArgs {maxSize = 10}) prop_ecnf
 
