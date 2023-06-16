@@ -3,6 +3,7 @@
 {-# LANGUAGE UnicodeSyntax, TypeSynonymInstances, FlexibleInstances #-}
 
 import Data.List
+import Data.List.Extra
 import qualified Data.Set as Set
 import qualified Data.Map as Map
 import Control.Monad
@@ -444,7 +445,9 @@ prop_one_literal =
 -- quickCheck prop_one_literal
 
 affirmative_negative :: CNF -> CNF
-affirmative_negative cnf = removeOnlyPosOrNeg newCnf sets
+affirmative_negative cnf = if cnf == [[]] 
+  then [[]]
+  else removeOnlyPosOrNeg newCnf sets
   where
     newCnf = one_literal cnf
     sets = getLiterals newCnf Set.empty
@@ -459,6 +462,9 @@ insertLiterals (l:ls) s = insertLiterals ls (Set.insert l s)
 
 removeOnlyPosOrNeg :: CNF -> Set.Set Literal -> CNF
 removeOnlyPosOrNeg [] _ = []
+removeOnlyPosOrNeg ([]:cs) s = ([]:newTail)
+  where
+    newTail = removeOnlyPosOrNeg cs s
 removeOnlyPosOrNeg (c:cs) s = if newClause /= []
   then (newClause:newTail)
   else newTail
@@ -467,6 +473,7 @@ removeOnlyPosOrNeg (c:cs) s = if newClause /= []
     newTail = removeOnlyPosOrNeg cs s
 
 removeClauseIfOnlyPositiveOrNegative :: CNFClause -> Set.Set Literal -> CNFClause
+-- A special case to use matching on newTail
 removeClauseIfOnlyPositiveOrNegative [] _ = [Pos "a"]
 removeClauseIfOnlyPositiveOrNegative (l:ls) s = if (isOnlyPosOrNeg l s)
   then []
@@ -495,30 +502,44 @@ prop_affirmative_negative =
 -- quickCheck prop_affirmative_negative
 
 resolution :: CNF -> CNF
-resolution cnf = doResolution cnf minVar
+resolution cnf = if cnf == [] 
+  then []
+  else nubOrd $ other ++ [nubOrd $ ls1 ++ ls2 | ls1 <- positive, ls2 <- negative]
   where
     occurenceMap = getLeastCommonVar cnf Map.empty
     min = minimum $ Map.elems occurenceMap
     minVar = head $ Map.keys $ Map.filter (== min) occurenceMap
+    res = doResolution cnf minVar
+    positive = getFirst res
+    negative = getSecond res
+    other = getThird res
 
-doResolution :: CNF -> String -> CNF
-doResolution [] _ = [[]]
-doResolution (c:cs) var = if (clauseContainsVar c var) 
-  then (((removeVarFromClause c var) ++ newHead):newTail)
-  else (newHead:c:newTail)
+doResolution :: CNF -> String -> (CNF, CNF, CNF)
+doResolution [] _ = ([], [], [])
+doResolution (c:cs) var = if (clauseContainsPos c var) 
+  then (((removeVarFromClause c var):positive), negative, other)
+  else if (clauseContainsNeg c var)
+    then (positive, ((removeVarFromClause c var):negative), other)
+    else (positive, negative, c:other)
   where
     res = doResolution cs var
-    newHead = head res
-    newTail = tail res
+    positive = getFirst res
+    negative = getSecond res
+    other = getThird res
 
-clauseContainsVar :: CNFClause -> String -> Bool
-clauseContainsVar cs var = foldr (\x a -> a || (getVarFromLiteral x == var)) True cs
+clauseContainsPos :: CNFClause -> String -> Bool
+clauseContainsPos cs var = foldr (\x a -> a || (x == (Pos var))) False cs
+
+clauseContainsNeg :: CNFClause -> String -> Bool
+clauseContainsNeg cs var = foldr (\x a -> a || (x == (Neg var))) False cs
 
 removeVarFromClause :: CNFClause -> String -> CNFClause
 removeVarFromClause [] _ = []
 removeVarFromClause (l:ls) var = if (getVarFromLiteral l == var)
-  then ls
-  else (l:(removeVarFromClause ls var))
+  then newTail
+  else (l:newTail)
+  where
+    newTail = removeVarFromClause ls var
 
 getLeastCommonVar :: CNF -> Map.Map String Int -> Map.Map String Int
 getLeastCommonVar [] m = m 
@@ -537,3 +558,27 @@ getVarFromLiteral (Neg x) = x
 prop_resolution :: Bool
 prop_resolution = resolution [[Pos "p", Pos "q"],[Neg "p", Neg "q"]] == [[Pos "q", Neg "q"]]
 
+--quickCheck prop_resolution
+
+dp :: CNF -> Bool
+dp cnf = if cnf == []
+  then True
+  else if [] `elem` cnf
+    then False
+    else dp . resolution . simplifyCnf $ cnf
+
+simplifyCnf :: CNF -> CNF
+simplifyCnf c = if (simplified == c)
+  then c
+  else simplifyCnf simplified 
+  where
+    simplified = affirmative_negative . one_literal $ c
+
+sat_DP :: SATSolver
+sat_DP form = dp cnf where
+  cnf = ecnf form
+
+prop_DP :: Formula -> Bool
+prop_DP φ = sat_DP φ == satisfiable φ
+
+--quickCheckWith (stdArgs {maxSize = 10}) prop_DP
