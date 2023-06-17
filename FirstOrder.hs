@@ -1,6 +1,7 @@
 {-# LANGUAGE UnicodeSyntax, TypeSynonymInstances, FlexibleInstances, LambdaCase #-}
 
 import Data.List
+import qualified Data.Set as Set
 import Control.Monad
 import Control.Monad.State
 import Test.QuickCheck hiding (Fun, (==>))
@@ -293,4 +294,81 @@ phi = Exists "x" (Exists "x" (Rel "r" [Fun "f" [Var "x", Var "y"]]))
 psi = Exists "x" (Rel "r" [Fun "f" [Var "x"]])
 
 --fresh (And phi psi)
+
+-- a simplified version of pnf, because when we skolemise, the formula is already nnf and has globally unique variables
+pnf :: Formula -> Formula
+pnf (Not (Exists v f)) = (Forall v $ pnf (Not f))
+pnf (Not (Forall v f)) = (Exists v $ pnf (Not f))
+pnf (Not f) = case pnfed of
+  Exists _ _ -> pnf $ Not pnfed
+  Forall _ _ -> pnf $ Not pnfed
+  _ -> Not pnfed
+  where 
+    pnfed = pnf f
+pnf (Exists v f) = Exists v $ pnf f
+pnf (Forall v f) = Forall v $ pnf f
+pnf (And (Exists v f1) f2) = (Exists v $ pnf (And (pnf f1) (pnf f2)))
+pnf (And f1 (Exists v f2)) = pnf (And (Exists v f2) f1)
+pnf (And (Forall v f1) f2) = (Forall v $ pnf (And (pnf f1) (pnf f2)))
+pnf (And f1 (Forall v f2)) = pnf (And (Forall v f2) f1)
+pnf (And f1 f2) = case pnfed1 of
+  Exists _ _ -> pnf $ And pnfed1 f2
+  Forall _ _ -> pnf $ And pnfed1 f2
+  _ -> case pnfed2 of
+    Exists _ _ -> pnf $ And pnfed2 pnfed1
+    Forall _ _ -> pnf $ And pnfed2 pnfed1
+    _ -> And pnfed1 pnfed2
+  where
+    pnfed1 = pnf f1
+    pnfed2 = pnf f2
+pnf (Or (Exists v f1) f2) = (Exists v $ pnf (Or (pnf f1) (pnf f2)))
+pnf (Or f1 (Exists v f2)) = pnf (Or (Exists v f2) f1)
+pnf (Or (Forall v f1) f2) = (Forall v $ pnf (Or (pnf f1) (pnf f2)))
+pnf (Or f1 (Forall v f2)) = pnf (Or (Forall v f2) f1)
+pnf (Or f1 f2) = case pnfed1 of
+  Exists _ _ -> pnf $ Or pnfed1 f2
+  Forall _ _ -> pnf $ Or pnfed1 f2
+  _ -> case pnfed2 of
+    Exists _ _ -> pnf $ Or pnfed2 pnfed1
+    Forall _ _ -> pnf $ Or pnfed2 pnfed1
+    _ -> Or pnfed1 pnfed2
+  where
+    pnfed1 = pnf f1
+    pnfed2 = pnf f2
+pnf f = f
+
+pnfProp = is_pnf . skolemise
+-- quickCheck pnfProp
+
+skolemise :: Formula -> Formula
+skolemise f = pnf skolem
+  where
+    quantified = quantifyExistentially f $ fv f
+    normal = nnf quantified
+    withFresh = fresh normal
+    skolem = applySkolem withFresh [] Set.empty
+
+quantifyExistentially :: Formula -> [VarName] -> Formula
+quantifyExistentially f [] = f
+quantifyExistentially f (var:vars) = quantifyExistentially (Exists var f) vars 
+
+applySkolem :: Formula -> [Term] -> Set.Set VarName -> Formula
+applySkolem (Not f) u e = Not $ applySkolem f u e
+applySkolem (And f1 f2) u e = (And (applySkolem f1 u e) (applySkolem f2 u e))
+applySkolem (Or f1 f2) u e = (Or (applySkolem f1 u e) (applySkolem f2 u e))
+applySkolem (Exists v f) u e = (applySkolem f u (Set.insert v e))
+applySkolem (Forall v f) u e = (Forall v (applySkolem f ((Var v):u) e))
+applySkolem (Rel r terms) u e = (Rel r (updateTerms terms u e))
+applySkolem f _ _ = f
+
+updateTerms :: [Term] -> [Term] -> Set.Set VarName -> [Term]
+updateTerms [] _ _ = []
+updateTerms (v:vs) u e = ((updateOneTerm u e v):(updateTerms vs u e))
+
+
+updateOneTerm :: [Term] -> Set.Set VarName -> Term -> Term
+updateOneTerm u e (Var v)  = if Set.member v e 
+  then (Fun v u)
+  else (Var v)
+updateOneTerm u e (Fun v ts) = (Fun v (map (updateOneTerm u e) ts))
 
