@@ -1,11 +1,14 @@
 {-# LANGUAGE UnicodeSyntax, TypeSynonymInstances, FlexibleInstances, LambdaCase #-}
 
+module FirstOrder where
+
 import Data.List
 import qualified Data.Set as Set
 import Control.Monad
 import Control.Monad.State
 import Test.QuickCheck hiding (Fun, (==>))
 import System.IO.Unsafe
+import Formula
 
 -- useful for debugging
 debug :: Show a => String -> a -> a
@@ -21,79 +24,14 @@ catalan n = map (map length) $ partitions [1..n]
 
 todo = undefined
 
-type VarName = String
-type FunName = String
-type RelName = String
-
 -- enumerate variants of a variable name
 variants :: VarName -> [VarName]
 variants x = x : [x ++ show n | n <- [0..]]
-
---instance {-# OVERLAPPING #-} Arbitrary VarName where
---  arbitrary = elements ["x", "y", "z", "t"]
-  
---instance {-# OVERLAPPING #-} Arbitrary FunName where
---  arbitrary = elements ["f", "g", "h", "i"]
-  
---instance {-# OVERLAPPING #-} Arbitrary RelName where
---  arbitrary = elements ["R", "S", "T", "U"]
-
-data Term = Var VarName | Fun FunName [Term] deriving (Eq, Ord, Show)
 
 varsT :: Term -> [VarName]
 varsT (Var x) = [x]
 varsT (Fun _ ts) = nub $ concatMap varsT ts
 
-instance Arbitrary Term where
-  arbitrary = resize 8 $ sized f where
-    f size | size == 0 || size == 1 = do x <- arbitrary
-                                         return $ Var x
-           | otherwise = frequency [ (1, go sizes) | sizes <- catalan size]
-              where go sizes = do ts <- sequence $ map f sizes
-                                  return $ Fun "f" ts
-
-data Formula =
-  T |
-  F |
-  Rel RelName [Term] |
-  Not Formula |
-  And Formula Formula |
-  Or Formula Formula |
-  Implies Formula Formula |
-  Iff Formula Formula |
-  Exists VarName Formula |
-  Forall VarName Formula deriving (Eq, Ord, Show)
-
-infixr 8 /\, ∧
-(/\) = And
-(∧) = And
-
-infixr 5 \/, ∨, ==>
-(\/) = Or
-(∨) = Or -- input with "\or"
-(==>) = Implies
-
-infixr 4 <==>, ⇔
-(<==>) = Iff
-(⇔) = Iff -- input with "\lr"
-
-instance Arbitrary Formula where
-    arbitrary = resize 30 $ sized f where
-      f 0 = do ts <- arbitrary
-               return $ Rel "R" ts
-      f size = frequency [
-        (1, liftM Not (f (size - 1))),
-        (4, do
-              size' <- choose (0, size - 1)
-              conn <- oneof $ map return [And, Or, Implies, Iff]
-              left <- f $ size'
-              right <- f $ size - size' - 1
-              return $ conn left right),
-        (5, do conn <- oneof $ map return [Exists, Forall]
-               phi <- f $ size - 1
-               x <- arbitrary
-               return $ conn x phi)
-        ]
 
 vars :: Formula -> [VarName]
 vars T = []
@@ -227,38 +165,8 @@ functions :: Eq a => [a] -> [b] -> [a -> b]
 functions [] _ = [undefined]
 functions (a:as) bs = merges [[update f a b | f <- functions as bs] | b <- bs]
 
-fv :: Formula -> [VarName]
-fv T = []
-fv F = []
-fv (Rel _ ts) = varsT (Fun "dummy" ts)
-fv (Not phi) = fv phi
-fv (And phi psi) = nub $ fv phi ++ fv psi
-fv (Or phi psi) = nub $ fv phi ++ fv psi
-fv (Implies phi psi) = nub $ fv phi ++ fv psi
-fv (Iff phi psi) = nub $ fv phi ++ fv psi
-fv (Exists x phi) = delete x $ fv phi
-fv (Forall x phi) = delete x $ fv phi
-
 prop_fv = fv (Exists "x" (Rel "R" [Fun "f" [Var "x", Var "y"], Var "z"])) == ["y", "z"]
 -- quickCheck prop_fv
-
-type Substitution = VarName -> Term
-
-substT :: Substitution -> Term -> Term
-substT σ (Var x) = σ x
-substT σ (Fun f ts) = Fun f (map (substT σ) ts)
-
-subst :: Substitution -> Formula -> Formula
-subst _ T = T
-subst _ F = F
-subst σ (Rel r ts) = Rel r $ map (substT σ) ts
-subst σ (Not phi) = Not $ subst σ phi
-subst σ (And phi psi) = And (subst σ phi) (subst σ psi)
-subst σ (Or phi psi) = Or (subst σ phi) (subst σ psi)
-subst σ (Implies phi psi) = Implies (subst σ phi) (subst σ psi)
-subst σ (Iff phi psi) = Iff (subst σ phi) (subst σ psi)
-subst σ (Exists x phi) = Exists x (subst (update σ x (Var x)) phi)
-subst σ (Forall x phi) = Forall x (subst (update σ x (Var x)) phi)
 
 generalise :: Formula -> Formula
 generalise phi = go $ fv phi

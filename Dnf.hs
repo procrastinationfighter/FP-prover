@@ -1,6 +1,6 @@
--- Basically just labs
--- Starting with LAB 1
 {-# LANGUAGE UnicodeSyntax, TypeSynonymInstances, FlexibleInstances #-}
+
+module Dnf where
 
 import Data.List
 import Data.List.Extra
@@ -24,15 +24,15 @@ todo = undefined
 -- propositional variable names are just strings
 type PropName = String
 
-data Formula =
+data SATFormula =
       T
     | F
     | Prop PropName -- atomic formulas
-    | Not Formula
-    | And Formula Formula
-    | Or Formula Formula
-    | Implies Formula Formula
-    | Iff Formula Formula
+    | Not SATFormula
+    | And SATFormula SATFormula
+    | Or SATFormula SATFormula
+    | Implies SATFormula SATFormula
+    | Iff SATFormula SATFormula
     deriving (Eq, Show)
 
 infixr 8 /\, ∧
@@ -48,7 +48,7 @@ infixr 4 <==>, ⇔
 (<==>) = Iff
 (⇔) = Iff -- input with "\lr"
 
-p, q, r, s, t :: Formula
+p, q, r, s, t :: SATFormula
 
 p = Prop "p"
 q = Prop "q"
@@ -73,7 +73,7 @@ unsatisfiable_formulas = [
     (p ⇔ q) ∧ (q ⇔ r) ∧ (r ⇔ s) ∧ (s ⇔ Not p)
   ]
 
-instance Arbitrary Formula where
+instance Arbitrary SATFormula where
     arbitrary = sized f where
       
       f 0 = oneof $ map return $ [p, q, r, s, t] ++ [T, F]
@@ -92,7 +92,7 @@ instance Arbitrary Formula where
 type Valuation = PropName -> Bool
 
 -- the evaluation function
-eval :: Formula -> Valuation -> Bool
+eval :: SATFormula -> Valuation -> Bool
 eval T _ = True
 eval F _ = False
 eval (Prop p) ρ = ρ p
@@ -128,7 +128,7 @@ test_eval =
 
 -- check that the eval function is efficient
 -- ifformula 3 == Iff (Iff (Iff T T) T) T
-ifformula :: Int -> Formula
+ifformula :: Int -> SATFormula
 ifformula 0 = T
 ifformula n = Iff (ifformula (n-1)) T
 
@@ -137,7 +137,7 @@ test_eval2 = eval (ifformula 23) (const True) == True
 
 -- quickCheck test_eval2
 
-variables :: Formula -> [PropName]
+variables :: SATFormula -> [PropName]
 variables = nub . go where
   go T = []
   go F = []
@@ -149,7 +149,7 @@ variables = nub . go where
   go (Iff φ ψ) = go φ ++ go ψ
   go _ = error "not a propositional formula"
 
-type SATSolver = Formula -> Bool
+type SATSolver = SATFormula -> Bool
 
 -- the list of all valuations on a given list of variables
 valuations :: [PropName] -> [Valuation]
@@ -159,10 +159,10 @@ valuations (x : xs) = concat [[update ρ x True, update ρ x False] | ρ <- valu
 satisfiable :: SATSolver
 satisfiable φ = or [eval φ ρ | ρ <- valuations (variables φ)]
 
-tautology :: Formula -> Bool
+tautology :: SATFormula -> Bool
 tautology φ = and [eval φ ρ | ρ <- valuations (variables φ)] -- not $ satisfiable $ Not \phi 
 
-is_nnf :: Formula -> Bool
+is_nnf :: SATFormula -> Bool
 is_nnf T = True
 is_nnf F = True
 is_nnf (Prop _) = True
@@ -178,7 +178,7 @@ is_nnf _ = error "not a propositional formula"
 --  is_nnf (Not p ∧ (q ∨ (r ∧ s)))  -- NNF example
 --  && (not $ is_nnf $ Not (p ∨ q)) -- NNF non-example
 
-nnf :: Formula -> Formula
+nnf :: SATFormula -> SATFormula
 nnf (Implies phi psi) = Or (propagateNot e1) e2
   where
     e1 = nnf phi
@@ -194,7 +194,7 @@ nnf (And phi psi) = And (nnf phi) (nnf psi)
 nnf (Or phi psi) = Or (nnf phi) (nnf psi)
 nnf x = x
 
-propagateNot :: Formula -> Formula
+propagateNot :: SATFormula -> SATFormula
 propagateNot (Or phi psi) = And (propagateNot phi) (propagateNot psi)
 propagateNot (And phi psi) = Or (propagateNot phi) (propagateNot psi)
 propagateNot (F) = T
@@ -202,7 +202,7 @@ propagateNot (T) = F
 propagateNot (Not x) = x
 propagateNot x = Not x
 
-prop_nnf :: Formula -> Bool
+prop_nnf :: SATFormula -> Bool
 prop_nnf φ = let ψ = nnf φ in is_nnf ψ && (tautology $ φ ⇔ ψ)
 
 -- quickCheck prop_nnf
@@ -217,7 +217,7 @@ literal2var (Neg p) = p
 type DNFClause = [Literal]
 type DNF = [DNFClause]
 
-dnf2formula :: [[Literal]] -> Formula
+dnf2formula :: [[Literal]] -> SATFormula
 dnf2formula [] = F
 dnf2formula lss = foldr1 Or (map go lss) where
   go [] = T
@@ -225,13 +225,13 @@ dnf2formula lss = foldr1 Or (map go lss) where
   go2 (Pos p) = Prop p
   go2 (Neg p) = Not (Prop p)
 
-dnf :: Formula -> DNF
+dnf :: SATFormula -> DNF
 dnf f = nnfToDnf normal
   where
     normal = nnf f
 
   
-nnfToDnf :: Formula -> DNF
+nnfToDnf :: SATFormula -> DNF
 nnfToDnf (And left right) = mergeDnf l r
   where
     l = nnfToDnf left
@@ -245,7 +245,7 @@ nnfToDnf F = [[(Pos "a"), (Neg "a")]]
 mergeDnf :: DNF -> DNF -> DNF
 mergeDnf ls rs = [ l++r | l <- ls, r <- rs] 
 
-test_dnf :: Formula -> Bool
+test_dnf :: SATFormula -> Bool
 test_dnf φ = tautology $ φ ⇔ (dnf2formula (dnf φ))
 
 -- quickCheckWith (stdArgs {maxSize = 18}) test_dnf
@@ -267,7 +267,7 @@ negg :: Literal -> Literal
 negg (Pos x) = (Neg x)
 negg (Neg x) = (Pos x)
 
-prop_sat_dnf :: Formula -> Bool
+prop_sat_dnf :: SATFormula -> Bool
 prop_sat_dnf phi = sat_dnf phi == satisfiable phi
 
 -- quickCheckWith (stdArgs {maxSize = 20}) prop_sat_dnf
@@ -291,7 +291,7 @@ opposite (Neg p) = Pos p
 type CNFClause = [Literal]
 type CNF = [CNFClause]
 
-cnf2formula :: CNF -> Formula
+cnf2formula :: CNF -> SATFormula
 cnf2formula [] = T
 cnf2formula lss = foldr1 And (map go lss) where
   go [] = F
@@ -308,7 +308,7 @@ negative_literals ls = nub [p | Neg p <- ls]
 literals :: [Literal] -> [PropName]
 literals ls = nub $ positive_literals ls ++ negative_literals ls
 
-cnf :: Formula -> CNF
+cnf :: SATFormula -> CNF
 cnf = go . nnf where
   go T = []
   go F = [[]]
@@ -317,15 +317,15 @@ cnf = go . nnf where
   go (φ `And` ψ) = go φ ++ go ψ
   go (φ `Or` ψ) = [as ++ bs | as <- go φ, bs <- go ψ]
 
-test_cnf :: Formula -> Bool
+test_cnf :: SATFormula -> Bool
 test_cnf φ = tautology $ φ ⇔ (cnf2formula (cnf φ))
 
 -- quickCheckWith (stdArgs {maxSize = 18}) test_cnf
 
-equi_satisfiable :: Formula -> Formula -> Bool
+equi_satisfiable :: SATFormula -> SATFormula -> Bool
 equi_satisfiable φ ψ = satisfiable φ == satisfiable ψ
 
-ecnf :: Formula -> CNF
+ecnf :: SATFormula -> CNF
 ecnf f = cnf conjunction
   where
     vars = variables f
@@ -336,12 +336,12 @@ getFirst (x, _, _) = x
 getSecond (_, x, _) = x
 getThird (_, _, x) = x
 
-makeConjunction :: [Formula] -> Formula
+makeConjunction :: [SATFormula] -> SATFormula
 makeConjunction [] = T 
 makeConjunction (x:[]) = x
 makeConjunction (x:xs) = And x (makeConjunction xs)
 
-ecnfMiddleStep :: Formula -> [PropName] -> (Formula, [PropName], [Formula])
+ecnfMiddleStep :: SATFormula -> [PropName] -> (SATFormula, [PropName], [SATFormula])
 ecnfMiddleStep (Not f) vars = ((Prop newVar), (newVar:updatedVars), ((Iff (Prop newVar) (Not newFormula)):formulas))
   where 
     x = ecnfMiddleStep f vars
@@ -390,7 +390,7 @@ ecnfMiddleStep f vars = (f, vars, [])
 
 -- ecnf (T ∧ F ∨ T)
 
-prop_ecnf :: Formula -> Bool
+prop_ecnf :: SATFormula -> Bool
 prop_ecnf phi = equi_satisfiable phi (cnf2formula $ ecnf phi)
 
 -- quickCheckWith (stdArgs {maxSize = 10}) prop_ecnf
@@ -578,7 +578,7 @@ sat_DP :: SATSolver
 sat_DP form = dp cnf where
   cnf = ecnf form
 
-prop_DP :: Formula -> Bool
+prop_DP :: SATFormula -> Bool
 prop_DP φ = sat_DP φ == satisfiable φ
 
 --quickCheckWith (stdArgs {maxSize = 10}) prop_DP

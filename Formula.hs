@@ -34,6 +34,28 @@ evalTerm :: FunInt a -> Env a -> Term -> a
 evalTerm _ rho (Var x) = rho x
 evalTerm int rho (Fun f ts) = int f $ map (evalTerm int rho) ts
 
+type Arity = Int
+type Signature = [(FunName, Arity)]
+
+sigT :: Term -> Signature
+sigT (Var _) = []
+sigT (Fun f ts) = nub $ (f, length ts) : concatMap sigT ts
+
+sig :: Formula -> Signature
+sig T = []
+sig F = []
+sig (Rel r ts) = concatMap sigT ts
+sig (Not phi) = sig phi
+sig (And phi psi) = nub $ sig phi ++ sig psi
+sig (Or phi psi) = nub $ sig phi ++ sig psi
+sig (Implies phi psi) = nub $ sig phi ++ sig psi
+sig (Iff phi psi) = nub $ sig phi ++ sig psi
+sig (Exists _ phi) = sig phi
+sig (Forall _ phi) = sig phi
+
+constants :: Signature -> [Term]
+constants s = [Fun c [] | (c, 0) <- s]
+
 -- our inductive type for first-order logic formulas
 data Formula =
       F
@@ -57,6 +79,7 @@ infixr 5 \/, ∨, -->
 (\/) = Or
 (∨) = Or
 (-->) = Implies
+(==>) = Implies
 
 infixr 4 <-->
 (<-->) = Iff

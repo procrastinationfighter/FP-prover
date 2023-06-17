@@ -17,7 +17,13 @@ import Test.QuickCheck hiding (Fun, (===))
 import Formula
 import Parser hiding (one)
 
-prover _ = False
+import FirstOrder
+import Herbrand
+
+prover :: Formula -> Bool
+prover f = useHerbrandTheorem skolem
+  where
+    skolem = skolemise f
 
 main :: IO ()
 main = do
