@@ -113,7 +113,6 @@ eval (Iff φ ψ) ρ = e1 == e2
   where
     e1 = eval φ ρ
     e2 = eval ψ ρ
-eval _  _ = error "not a propositional formula"
 
 ρ0 = const True
 ρ1 = const False
@@ -147,7 +146,6 @@ variables = nub . go where
   go (Or φ ψ) = go φ ++ go ψ
   go (Implies φ ψ) = go φ ++ go ψ
   go (Iff φ ψ) = go φ ++ go ψ
-  go _ = error "not a propositional formula"
 
 type SATSolver = SATFormula -> Bool
 
@@ -172,7 +170,6 @@ is_nnf (Or phi psi) = is_nnf phi && is_nnf psi
 is_nnf (Implies phi psi) = False
 is_nnf (Iff phi psi) = False
 is_nnf (Not _) = False
-is_nnf _ = error "not a propositional formula"
 
 -- quickCheck $
 --  is_nnf (Not p ∧ (q ∨ (r ∧ s)))  -- NNF example

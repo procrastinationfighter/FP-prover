@@ -20,10 +20,15 @@ import Parser hiding (one)
 import FirstOrder
 import Herbrand
 
+removeQuants :: Formula -> Formula
+removeQuants (Forall _ f) = removeQuants f 
+removeQuants (Exists _ f) = removeQuants f 
+removeQuants f = f
+
 prover :: Formula -> Bool
-prover f = useHerbrandTheorem skolem
+prover f = useHerbrandTheorem $ removeQuants skolem
   where
-    skolem = skolemise f
+    skolem = skolemise (Not f)
 
 main :: IO ()
 main = do

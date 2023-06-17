@@ -10,12 +10,13 @@ import Formula
 import Dnf
 
 useHerbrandTheorem :: Formula -> Bool
-useHerbrandTheorem f = startHerbrand c sigs f
+useHerbrandTheorem f = startHerbrand c s f
   where
     sigs = sig f
     consts = constants sigs
     -- If there are no constants, we must assume there is one.
     c = if consts == [] then [Fun "a constant" []] else consts
+    s = if consts == [] then (("a constant", 0):sigs) else sigs
 
 generateUniverse :: [Term] -> Signature -> [Term]
 generateUniverse previous funcs = newGen
@@ -25,7 +26,7 @@ generateUniverse previous funcs = newGen
     newGen = nub $ concat funcsWithArgsSet
 
 startHerbrand :: [Term] -> Signature -> Formula -> Bool
-startHerbrand consts funcs f = herbrand consts funcs f vars
+startHerbrand consts funcs f = herbrand [] funcs f vars
   where
     vars = fv f
 
@@ -40,11 +41,11 @@ herbrand prevUniverse funcs f vars = do
     if (hasUniverseChanged prevUniverse universe)
         then do 
             let res = checkHerbrand universe f vars
-            if res then True else herbrand universe funcs f vars
+            if (not res) then True else herbrand universe funcs f vars
         else False
 
 checkHerbrand :: [Term] -> Formula -> [VarName] -> Bool
-checkHerbrand universe f vars = undefined
+checkHerbrand universe f vars = checkEvaluations evals f vars
   where
     evals = replicateM (length vars) universe
 
