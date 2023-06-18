@@ -3,7 +3,7 @@
 all: FO-prover
 
 FO-prover: FO-prover.hs *.hs
-	ghc -o FO-prover FO-prover.hs -package QuickCheck -package parsec -package random -package extra
+	ghc -O1 -o FO-prover FO-prover.hs -package QuickCheck -package parsec -package random -package extra
 
 clean:
 	rm FO-prover *.hi *.o
